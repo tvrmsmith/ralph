@@ -1,16 +1,18 @@
 #!/bin/bash
 # Ralph Wiggum - Long-running AI agent loop
-# Usage: ./ralph.sh [--tool amp|claude] [--docker-sandbox [FLAGS]] [max_iterations]
+# Usage: ./ralph.sh --tool <amp|claude|claude-sandbox> [docker flags...] [max_iterations]
 #
-# Docker Sandbox Example:
-#   ./ralph.sh --tool claude --docker-sandbox "--volume $PWD:/workspace --env FOO=bar --name ralph"
+# Examples:
+#   ./ralph.sh --tool claude
+#   ./ralph.sh --tool claude 20
+#   ./ralph.sh --tool claude-sandbox
+#   ./ralph.sh --tool claude-sandbox --volume $PWD:/workspace --env FOO=bar 20
 
 set -e
 
 # Parse arguments
 TOOL="amp" # Default to amp for backwards compatibility
 MAX_ITERATIONS=10
-USE_DOCKER=false
 DOCKER_FLAGS=""
 
 while [[ $# -gt 0 ]]; do
@@ -18,24 +20,23 @@ while [[ $# -gt 0 ]]; do
 	--tool)
 		TOOL="$2"
 		shift 2
+
+		# If tool is claude-sandbox, collect any docker flags that follow
+		if [[ "$TOOL" == "claude-sandbox" ]]; then
+			# Collect docker flags (anything starting with - or -- that's not a number)
+			while [[ $# -gt 0 ]] && [[ "$1" =~ ^- ]] && [[ ! "$1" =~ ^[0-9]+$ ]]; do
+				DOCKER_FLAGS="$DOCKER_FLAGS $1"
+				shift
+				# If this flag takes a value (next arg doesn't start with -)
+				if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ ^[0-9]+$ ]]; then
+					DOCKER_FLAGS="$DOCKER_FLAGS $1"
+					shift
+				fi
+			done
+		fi
 		;;
 	--tool=*)
 		TOOL="${1#*=}"
-		shift
-		;;
-	--docker-sandbox)
-		USE_DOCKER=true
-		# Check if next arg is flags (doesn't start with -- or is not a number)
-		if [[ $# -gt 1 ]] && [[ ! "$2" =~ ^--[a-z] ]] && [[ ! "$2" =~ ^[0-9]+$ ]]; then
-			DOCKER_FLAGS="$2"
-			shift 2
-		else
-			shift
-		fi
-		;;
-	--docker-sandbox=*)
-		USE_DOCKER=true
-		DOCKER_FLAGS="${1#*=}"
 		shift
 		;;
 	*)
@@ -49,16 +50,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate tool choice
-if [[ "$TOOL" != "amp" && "$TOOL" != "claude" ]]; then
-	echo "Error: Invalid tool '$TOOL'. Must be 'amp' or 'claude'."
+if [[ "$TOOL" != "amp" && "$TOOL" != "claude" && "$TOOL" != "claude-sandbox" ]]; then
+	echo "Error: Invalid tool '$TOOL'. Must be 'amp', 'claude', or 'claude-sandbox'."
 	exit 1
-fi
-
-# Warn if Docker sandbox is used with non-Claude tools
-if [[ "$USE_DOCKER" == true && "$TOOL" != "claude" ]]; then
-	echo "Warning: Docker sandbox (--docker-sandbox) only works with Claude Code (--tool claude)."
-	echo "         The --docker-sandbox flag will be ignored for tool '$TOOL'."
-	echo ""
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -109,9 +103,9 @@ if [ ! -f "$PROGRESS_FILE" ]; then
 	echo "---" >>"$PROGRESS_FILE"
 fi
 
-if [[ "$USE_DOCKER" == true ]]; then
-	echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS - Docker: enabled"
-	[[ -n "$DOCKER_FLAGS" ]] && echo "Docker flags: $DOCKER_FLAGS"
+if [[ "$TOOL" == "claude-sandbox" ]]; then
+	echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
+	[[ -n "$DOCKER_FLAGS" ]] && echo "Docker flags:$DOCKER_FLAGS"
 else
 	echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
 fi
@@ -119,25 +113,18 @@ fi
 for i in $(seq 1 $MAX_ITERATIONS); do
 	echo ""
 	echo "==============================================================="
-	if [[ "$USE_DOCKER" == true ]]; then
-		echo "  Ralph Iteration $i of $MAX_ITERATIONS ($TOOL - Docker)"
-	else
-		echo "  Ralph Iteration $i of $MAX_ITERATIONS ($TOOL)"
-	fi
+	echo "  Ralph Iteration $i of $MAX_ITERATIONS ($TOOL)"
 	echo "==============================================================="
 
 	# Run the selected tool with the ralph prompt
 	if [[ "$TOOL" == "amp" ]]; then
 		OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" | amp --dangerously-allow-all 2>&1 | tee /dev/stderr) || true
+	elif [[ "$TOOL" == "claude-sandbox" ]]; then
+		# Run in Docker sandbox with optional additional flags
+		OUTPUT=$(docker sandbox run $DOCKER_FLAGS -- --print <"$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
 	else
-		# Claude Code: use --dangerously-skip-permissions for autonomous operation, --print for output
-		if [[ "$USE_DOCKER" == true ]]; then
-			# Run in Docker sandbox with optional additional flags
-			OUTPUT=$(docker sandbox run $DOCKER_FLAGS -- --print <"$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
-		else
-			# Run locally
-			OUTPUT=$(claude --dangerously-skip-permissions --print <"$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
-		fi
+		# Run locally
+		OUTPUT=$(claude --dangerously-skip-permissions --print <"$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
 	fi
 
 	# Check for completion signal
