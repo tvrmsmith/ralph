@@ -1,11 +1,12 @@
 #!/bin/bash
 # Ralph Wiggum - Long-running AI agent loop
-# Usage: ./ralph.sh --tool <amp|claude|claude-sandbox> [docker flags...] [max_iterations]
+# Usage: ./ralph.sh --tool <amp|claude|claude-sandbox> [--sandbox <name>] [docker flags...] [max_iterations]
 #
 # Examples:
 #   ./ralph.sh --tool claude
 #   ./ralph.sh --tool claude 20
 #   ./ralph.sh --tool claude-sandbox
+#   ./ralph.sh --tool claude-sandbox --sandbox existing-sandbox-name
 #   ./ralph.sh --tool claude-sandbox --volume $PWD:/workspace --env FOO=bar 20
 
 set -e
@@ -14,6 +15,7 @@ set -e
 TOOL="amp" # Default to amp for backwards compatibility
 MAX_ITERATIONS=10
 DOCKER_FLAGS=""
+SANDBOX_NAME=""
 
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -25,18 +27,34 @@ while [[ $# -gt 0 ]]; do
 		if [[ "$TOOL" == "claude-sandbox" ]]; then
 			# Collect docker flags (anything starting with - or -- that's not a number)
 			while [[ $# -gt 0 ]] && [[ "$1" =~ ^- ]] && [[ ! "$1" =~ ^[0-9]+$ ]]; do
-				DOCKER_FLAGS="$DOCKER_FLAGS $1"
-				shift
-				# If this flag takes a value (next arg doesn't start with -)
-				if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ ^[0-9]+$ ]]; then
+				if [[ "$1" == "--sandbox" ]]; then
+					SANDBOX_NAME="$2"
+					shift 2
+				elif [[ "$1" == --sandbox=* ]]; then
+					SANDBOX_NAME="${1#*=}"
+					shift
+				else
 					DOCKER_FLAGS="$DOCKER_FLAGS $1"
 					shift
+					# If this flag takes a value (next arg doesn't start with -)
+					if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ ^[0-9]+$ ]]; then
+						DOCKER_FLAGS="$DOCKER_FLAGS $1"
+						shift
+					fi
 				fi
 			done
 		fi
 		;;
 	--tool=*)
 		TOOL="${1#*=}"
+		shift
+		;;
+	--sandbox)
+		SANDBOX_NAME="$2"
+		shift 2
+		;;
+	--sandbox=*)
+		SANDBOX_NAME="${1#*=}"
 		shift
 		;;
 	*)
@@ -96,6 +114,8 @@ if [ -f "$PRD_FILE" ]; then
 	fi
 fi
 
+mkdir -p "$RALPH_DIR"
+
 # Initialize progress file if it doesn't exist
 if [ ! -f "$PROGRESS_FILE" ]; then
 	echo "# Ralph Progress Log" >"$PROGRESS_FILE"
@@ -105,6 +125,7 @@ fi
 
 if [[ "$TOOL" == "claude-sandbox" ]]; then
 	echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
+	[[ -n "$SANDBOX_NAME" ]] && echo "Sandbox name: $SANDBOX_NAME"
 	[[ -n "$DOCKER_FLAGS" ]] && echo "Docker flags:$DOCKER_FLAGS"
 else
 	echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
@@ -120,8 +141,9 @@ for i in $(seq 1 $MAX_ITERATIONS); do
 	if [[ "$TOOL" == "amp" ]]; then
 		OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" | amp --dangerously-allow-all 2>&1 | tee /dev/stderr) || true
 	elif [[ "$TOOL" == "claude-sandbox" ]]; then
-		# Run in Docker sandbox with optional additional flags
-		OUTPUT=$(docker sandbox run $DOCKER_FLAGS -- --print <"$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
+		# Run in Docker sandbox with optional sandbox name and additional flags
+		# SANDBOX_NAME is passed as a positional arg (runs existing sandbox by name, or defaults to "claude")
+		OUTPUT=$(docker sandbox run ${SANDBOX_NAME:-claude} $DOCKER_FLAGS -- --print <"$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
 	else
 		# Run locally
 		OUTPUT=$(claude --dangerously-skip-permissions --print <"$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
