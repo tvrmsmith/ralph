@@ -1,66 +1,71 @@
 #!/bin/bash
 # Ralph Wiggum - Long-running AI agent loop
-# Usage: ./ralph.sh --tool <amp|claude|claude-sandbox> [--sandbox <name>] [docker flags...] [max_iterations]
+# Usage: ./ralph.sh --tool <amp|claude|claude-sandbox> [--sandbox <name>] [max_iterations]
 #
 # Examples:
 #   ./ralph.sh --tool claude
 #   ./ralph.sh --tool claude 20
 #   ./ralph.sh --tool claude-sandbox
 #   ./ralph.sh --tool claude-sandbox --sandbox existing-sandbox-name
-#   ./ralph.sh --tool claude-sandbox --volume $PWD:/workspace --env FOO=bar 20
 
 set -e
 
 # Parse arguments
 TOOL="amp" # Default to amp for backwards compatibility
 MAX_ITERATIONS=10
-DOCKER_FLAGS=""
 SANDBOX_NAME=""
+
+show_help() {
+	cat <<EOF
+Usage: ralph.sh [OPTIONS] [max_iterations]
+
+Run Ralph, a long-running AI agent loop.
+
+OPTIONS:
+  --tool <tool>         AI tool to use: amp, claude, claude-sandbox (default: amp)
+  --sandbox <name>      Sandbox name for claude-sandbox tool (default: claude)
+  -h, --help            Show this help message
+
+ARGUMENTS:
+  max_iterations        Maximum number of iterations to run (default: 10)
+
+EXAMPLES:
+  ralph.sh --tool claude
+  ralph.sh --tool claude 20
+  ralph.sh --tool claude-sandbox
+  ralph.sh --tool claude-sandbox --sandbox existing-sandbox-name
+EOF
+}
 
 while [[ $# -gt 0 ]]; do
 	case $1 in
+	-h | --help)
+		show_help
+		exit 0
+		;;
 	--tool)
 		TOOL="$2"
 		shift 2
-
-		# If tool is claude-sandbox, collect any docker flags that follow
-		if [[ "$TOOL" == "claude-sandbox" ]]; then
-			# Collect docker flags (anything starting with - or -- that's not a number)
-			while [[ $# -gt 0 ]] && [[ "$1" =~ ^- ]] && [[ ! "$1" =~ ^[0-9]+$ ]]; do
-				if [[ "$1" == "--sandbox" ]]; then
-					SANDBOX_NAME="$2"
-					shift 2
-				elif [[ "$1" == --sandbox=* ]]; then
-					SANDBOX_NAME="${1#*=}"
-					shift
-				else
-					DOCKER_FLAGS="$DOCKER_FLAGS $1"
-					shift
-					# If this flag takes a value (next arg doesn't start with -)
-					if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ ^[0-9]+$ ]]; then
-						DOCKER_FLAGS="$DOCKER_FLAGS $1"
-						shift
-					fi
-				fi
-			done
-		fi
 		;;
 	--tool=*)
 		TOOL="${1#*=}"
 		shift
 		;;
-	--sandbox)
+	--sandbox | --docker-sandbox)
 		SANDBOX_NAME="$2"
 		shift 2
 		;;
-	--sandbox=*)
+	--sandbox=* | --docker-sandbox=*)
 		SANDBOX_NAME="${1#*=}"
 		shift
 		;;
 	*)
-		# Assume it's max_iterations if it's a number
 		if [[ "$1" =~ ^[0-9]+$ ]]; then
 			MAX_ITERATIONS="$1"
+		else
+			echo "Error: Unknown option '$1'"
+			echo "Run with -h for usage."
+			exit 1
 		fi
 		shift
 		;;
@@ -123,13 +128,8 @@ if [ ! -f "$PROGRESS_FILE" ]; then
 	echo "---" >>"$PROGRESS_FILE"
 fi
 
-if [[ "$TOOL" == "claude-sandbox" ]]; then
-	echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
-	[[ -n "$SANDBOX_NAME" ]] && echo "Sandbox name: $SANDBOX_NAME"
-	[[ -n "$DOCKER_FLAGS" ]] && echo "Docker flags:$DOCKER_FLAGS"
-else
-	echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
-fi
+echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
+[[ "$TOOL" == "claude-sandbox" && -n "$SANDBOX_NAME" ]] && echo "Sandbox name: $SANDBOX_NAME"
 
 for i in $(seq 1 $MAX_ITERATIONS); do
 	echo ""
@@ -141,9 +141,9 @@ for i in $(seq 1 $MAX_ITERATIONS); do
 	if [[ "$TOOL" == "amp" ]]; then
 		OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" | amp --dangerously-allow-all 2>&1 | tee /dev/stderr) || true
 	elif [[ "$TOOL" == "claude-sandbox" ]]; then
-		# Run in Docker sandbox with optional sandbox name and additional flags
-		# SANDBOX_NAME is passed as a positional arg (runs existing sandbox by name, or defaults to "claude")
-		OUTPUT=$(docker sandbox run ${SANDBOX_NAME:-claude} $DOCKER_FLAGS -- --print <"$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
+		# Run in Docker sandbox. docker sandbox run does not forward piped stdin to the agent,
+		# so we pass the prompt content as a CLI argument using command substitution on the host.
+		OUTPUT=$(docker sandbox run ${SANDBOX_NAME:-claude} -- --verbose --print "$(cat "$SCRIPT_DIR/CLAUDE.md")" 2>&1 | tee /dev/stderr) || true
 	else
 		# Run locally
 		OUTPUT=$(claude --dangerously-skip-permissions --print <"$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
