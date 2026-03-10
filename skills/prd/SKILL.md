@@ -67,6 +67,7 @@ Brief description of the feature and the problem it solves.
 Specific, measurable objectives (bullet list).
 
 ### 3. User Stories
+
 Each story needs:
 - **Title:** Short descriptive name
 - **Description:** "As a [user], I want [feature] so that [benefit]"
@@ -74,10 +75,25 @@ Each story needs:
 
 Each story should be small enough to implement in one focused session.
 
+**Structure stories as vertical slices of valuable functionality.** A vertical slice cuts through all necessary layers (infrastructure, API, UI) to deliver something a real user can see or use. Avoid splitting work horizontally by technical layer — a "backend story" and "frontend story" that deliver nothing working independently are horizontal slices, not vertical ones. Each story should be independently demonstrable to a stakeholder.
+
+**User story rules:**
+- **Never use "developer" as the user.** Use real end-user roles: clinician, operator, admin, patient, etc. For infrastructure or platform work with no direct end-user, use the role that benefits operationally (e.g., "as an operator, I want the service deployed to production so that...").
+- **Security must ship with the story that introduces the attack surface.** Never defer auth/authentication to a later story — if a webhook or endpoint is being built, its authentication is part of that same story.
+- **Infrastructure stories must target the appropriate production environment.** If the service will run in production, the scaffold story must include the full pipeline to production, not just dev.
+- **Research and investigation belong inside the story that needs the answers**, not as a standalone spike. Use a `Research (complete before implementing)` subsection within the relevant story to keep work just-in-time.
+- **Conditional stories:** If a story is only needed based on an unknown (e.g., "only if an API doesn't already exist"), mark it explicitly with a note at the top of the story.
+- **Show story dependencies** as a dependency tree after the stories section when dependencies are non-obvious.
+
 **Format:**
 ```markdown
 ### US-001: [Title]
-**Description:** As a [user], I want [feature] so that [benefit].
+**Description:** As a [real user role], I want [feature] so that [benefit].
+
+> **This story is only required if [condition].** [Guidance on when to skip.]
+
+**Research (complete before implementing):**
+- [ ] Specific question that must be answered first
 
 **Acceptance Criteria:**
 - [ ] Specific verifiable criterion
@@ -86,7 +102,17 @@ Each story should be small enough to implement in one focused session.
 - [ ] **[UI stories only]** Verify in browser using dev-browser skill
 ```
 
-**Important:** 
+Omit the `Research` and conditional note sections when not needed.
+
+**Story dependency tree (include when dependencies are non-obvious):**
+```
+US-001 (can begin immediately)
+  └─► US-002 (depends on US-001)
+        ├─► US-003
+        └─► US-004 (conditional — only if X)
+```
+
+**Important:**
 - Acceptance criteria must be verifiable, not vague. "Works correctly" is bad. "Button shows confirmation dialog before deleting" is good.
 - **For any story with UI changes:** Always include "Verify in browser using dev-browser skill" as acceptance criteria. This ensures visual verification of frontend work.
 
@@ -158,16 +184,19 @@ Add priority levels to tasks so users can focus on what matters most. Tasks can 
 
 ## User Stories
 
-### US-001: Add priority field to database
-**Description:** As a developer, I need to store task priority so it persists across sessions.
+### US-001: User can see and set task priority
+**Description:** As a team member, I want to assign and view priority on tasks so that I know what needs attention first.
 
 **Acceptance Criteria:**
 - [ ] Add priority column to tasks table: 'high' | 'medium' | 'low' (default 'medium')
 - [ ] Generate and run migration successfully
+- [ ] Each task card shows colored priority badge (red=high, yellow=medium, gray=low)
+- [ ] Priority dropdown in task edit modal; saves immediately on selection change
 - [ ] Typecheck passes
+- [ ] Verify in browser using dev-browser skill
 
-### US-002: Display priority indicator on task cards
-**Description:** As a user, I want to see task priority at a glance so I know what needs attention first.
+### US-002: User can filter tasks by priority
+**Description:** As a team member, I want to filter the task list to see only high-priority items so that I can focus on what matters most.
 
 **Acceptance Criteria:**
 - [ ] Each task card shows colored priority badge (red=high, yellow=medium, gray=low)
@@ -236,6 +265,13 @@ Before saving the PRD:
 - [ ] Asked clarifying questions with lettered options
 - [ ] Incorporated user's answers
 - [ ] User stories are small and specific
+- [ ] Stories are vertical slices — each delivers end-to-end working functionality
+- [ ] No "developer" as user — real end-user roles or "operator" for platform/infra work
+- [ ] Security is included in the story that introduces the attack surface, not deferred
+- [ ] Infrastructure stories target the right environment (prod if the service runs in prod)
+- [ ] Research items live inside the stories that need them, not as standalone spikes
+- [ ] Conditional stories are clearly marked
+- [ ] Dependency tree included if story order is non-obvious
 - [ ] Functional requirements are numbered and unambiguous
 - [ ] Non-goals section defines clear boundaries
 - [ ] Saved to `tasks/prd-[feature-name].md`
